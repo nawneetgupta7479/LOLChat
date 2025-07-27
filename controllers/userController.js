@@ -1,4 +1,5 @@
 import { uploadToS3, deleteFromS3 } from '../utils/s3Upload.js';
+import { generateAvatarUrl } from '../utils/avatar.js';
 import User from '../models/user.js';
 
 // Get current user's profile
@@ -57,6 +58,9 @@ export const editProfile = async (req, res) => {
     // Upload new profile pic to S3
     const profilePicUrl = await uploadToS3(req.file);
     updateData.profilePic = profilePicUrl;
+  } else if (fullName && !user.profilePic) {
+    // Only set avatar if user didn't have a profilePic before
+    updateData.profilePic = generateAvatarUrl(fullName);
   }
 
   const updatedUser = await User.findByIdAndUpdate(userId, updateData, { new: true });

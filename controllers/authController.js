@@ -1,10 +1,10 @@
-
 import User from '../models/user.js';
 import Otp from '../models/Otp.js';
 import generateOTP from '../utils/generateOtp.js';
 import sendEmail from '../utils/sendMail.js';
 import jwt from 'jsonwebtoken';
 import { uploadToS3 } from '../utils/s3Upload.js';
+import { generateAvatarUrl } from '../utils/avatar.js';
 
 export const sendOtp = async (req, res) => {
   const { email } = req.body;
@@ -29,19 +29,28 @@ export const verifyOtp = async (req, res) => {
   await Otp.deleteMany({ email });
 
   const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-  res.cookie('token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  });
 
-  res.status(200).json({
-    message: 'OTP verified',
-    userExists: Boolean(user.fullName),
-    email,
-    token
-  });
+  if (user.fullName) {
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    return res.status(200).json({
+      message: 'OTP verified',
+      userExists: true,
+      user,
+      token
+    });
+  } else {
+    // Don't set token, require profile completion
+    return res.status(200).json({
+      message: 'OTP verified, please complete profile',
+      userExists: false,
+      user
+    });
+  }
 };
 
 export const completeProfile = async (req, res) => {
@@ -60,6 +69,8 @@ export const completeProfile = async (req, res) => {
   let profilePicUrl = '';
   if (req.file) {
     profilePicUrl = await uploadToS3(req.file);
+  } else {
+    profilePicUrl = generateAvatarUrl(fullName);
   }
 
   user.fullName = fullName;
@@ -67,15 +78,19 @@ export const completeProfile = async (req, res) => {
   user.username = username;
   await user.save();
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-  res.cookie('token', token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000
-  });
-
-  res.status(200).json({ message: 'Profile completed', user, token });
+  // After updating user.fullName
+  if (user.fullName) {
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+    return res.status(200).json({ message: 'Profile completed', user, token });
+  } else {
+    return res.status(400).json({ message: 'Full name is required' });
+  }
 };
 
 export const logout = (req, res) => {
@@ -85,4 +100,14 @@ export const logout = (req, res) => {
     sameSite: 'lax'
   });
   res.status(200).json({ message: 'Logged out successfully' });
+};
+
+export const checkEmail = async (req, res) => {
+  const { email } = req.body;
+  const user = await User.findOne({ email });
+  if (user) {
+    return res.json({ exists: true, message: 'Email already exists' });
+  } else {
+    return res.json({ exists: false, message: 'Email not found' });
+  }
 };
