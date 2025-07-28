@@ -31,7 +31,7 @@ export const searchUsers = async (req, res) => {
 // Edit user's profile
 export const editProfile = async (req, res) => {
   const userId = req.user.id;
-  const { fullName, username } = req.body;
+  const { fullName, username, removeProfilePic } = req.body;
 
   let updateData = {};
 
@@ -50,12 +50,17 @@ export const editProfile = async (req, res) => {
 
   const user = await User.findById(userId);
 
-  if (req.file) {
-    // Delete previous profile pic from S3 if exists
+  if (removeProfilePic === 'true' || removeProfilePic === true) {
+    // Remove profile picture
     if (user.profilePic) {
       await deleteFromS3(user.profilePic);
     }
+    updateData.profilePic = generateAvatarUrl(fullName || user.fullName);
+  } else if (req.file) {
     // Upload new profile pic to S3
+    if (user.profilePic) {
+      await deleteFromS3(user.profilePic);
+    }
     const profilePicUrl = await uploadToS3(req.file);
     updateData.profilePic = profilePicUrl;
   } else if (fullName && !user.profilePic) {
